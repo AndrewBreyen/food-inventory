@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.build/
+inventory-api.zip
+data/inventory.json
+data/inventory.json.tmp
+.env
+.DS_Store

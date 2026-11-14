@@ -1,0 +1,290 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CreateTaggedPantryTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:CreateTable"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:475693412214:table/pantry-food-inventory-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManageTaggedPantryTable",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:DescribeTable",
+        "dynamodb:UpdateTable",
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource",
+        "dynamodb:DescribeContinuousBackups",
+        "dynamodb:UpdateContinuousBackups",
+        "dynamodb:DescribeTimeToLive",
+        "dynamodb:UpdateTimeToLive"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:475693412214:table/pantry-food-inventory-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedHouseholdPool",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:CreateUserPool"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManageTaggedHouseholdPoolAndClient",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:UpdateUserPool",
+        "cognito-idp:TagResource",
+        "cognito-idp:UntagResource",
+        "cognito-idp:ListTagsForResource",
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPoolClient",
+        "cognito-idp:DeleteUserPoolClient"
+      ],
+      "Resource": "arn:aws:cognito-idp:us-east-1:475693412214:userpool/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateAndManagePantryLogGroup",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
+      ],
+      "Resource": "arn:aws:logs:us-east-1:475693412214:log-group:/aws/lambda/pantry-food-inventory-InventoryApi*"
+    },
+    {
+      "Sid": "DescribeLogGroups",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "us-east-1"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedLambdaExecutionRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole"
+      ],
+      "Resource": "arn:aws:iam::475693412214:role/pantry-food-inventory-InventoryLambdaRole-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManagePantryLambdaExecutionRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "arn:aws:iam::475693412214:role/pantry-food-inventory-InventoryLambdaRole-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "PassOnlyPantryExecutionRoleToLambda",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::475693412214:role/pantry-food-inventory-InventoryLambdaRole-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com",
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedPantryFunction",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:475693412214:function:pantry-food-inventory-InventoryApiFunction-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManageTaggedPantryFunction",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:UpdateFunctionCode",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:AddPermission",
+        "lambda:RemovePermission",
+        "lambda:GetPolicy",
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": "arn:aws:lambda:us-east-1:475693412214:function:pantry-food-inventory-InventoryApiFunction-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ReadLambdaArtifact",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::pantry-artifacts-475693412214-us-east-1-an/inventory-api/*"
+    },
+    {
+      "Sid": "CreateAndManageTaggedWebAssetsBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketPolicy",
+        "s3:PutBucketPolicy",
+        "s3:DeleteBucketPolicy",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetBucketVersioning",
+        "s3:PutBucketVersioning",
+        "s3:GetLifecycleConfiguration",
+        "s3:PutLifecycleConfiguration",
+        "s3:GetBucketTagging",
+        "s3:PutBucketTagging"
+      ],
+      "Resource": "arn:aws:s3:::pantry-food-inventory-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedWebAssetsBucket",
+      "Effect": "Allow",
+      "Action": "s3:CreateBucket",
+      "Resource": "arn:aws:s3:::pantry-food-inventory-*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedPantryApi",
+      "Effect": "Allow",
+      "Action": "apigateway:POST",
+      "Resource": "arn:aws:apigateway:us-east-1::/apis",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManagePantryApiResources",
+      "Effect": "Allow",
+      "Action": [
+        "apigateway:GET",
+        "apigateway:POST",
+        "apigateway:PUT",
+        "apigateway:PATCH",
+        "apigateway:DELETE"
+      ],
+      "Resource": "arn:aws:apigateway:us-east-1::/apis/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateTaggedPantryDistribution",
+      "Effect": "Allow",
+      "Action": "cloudfront:CreateDistribution",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "ManageTaggedPantryDistribution",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:ListTagsForResource",
+        "cloudfront:TagResource",
+        "cloudfront:UntagResource"
+      ],
+      "Resource": "arn:aws:cloudfront::475693412214:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/App": "pantry-food-inventory"
+        }
+      }
+    },
+    {
+      "Sid": "CreateAndReadOriginAccessControl",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:CreateOriginAccessControl",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:GetOriginAccessControlConfig"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

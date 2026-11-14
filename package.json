@@ -1,0 +1,30 @@
+{
+  "name": "food-inventory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node server/index.mjs",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "package:lambda": "mkdir -p .build/lambda && esbuild server/aws-handler.cjs --bundle --platform=node --target=node22 --format=cjs --outfile=.build/lambda/index.js && cp server/lambda-package.json .build/lambda/package.json && cd .build/lambda && zip -q -r ../../inventory-api.zip ."
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1161.0",
+    "@aws-sdk/lib-dynamodb": "3.1161.0",
+    "aws-amplify": "6.22.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.2",
+    "concurrently": "10.0.6",
+    "esbuild": "0.28.2",
+    "vite": "8.3.5"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

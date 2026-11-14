@@ -1,0 +1,400 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Shared household food inventory stack with private CloudFront hosting,
+  Cognito sign-in, an authenticated HTTP API, Lambda, and DynamoDB.
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: React/S3+CloudFront -> HTTP API/JWT -> Lambda -> single-table DynamoDB; Cognito SRP login
+    must:
+      - Keep browser AWS credentials out of the app; call only the JWT-protected API
+      - Keep HOME#primary partition key stable unless all stored inventory is migrated
+      - Keep /api/* uncached and forward Authorization through CloudFront
+    ref:
+      - at: ../README.md
+        has: Architecture choices, data access patterns, local use, scanner path, deployment steps
+        scope: project
+Resources:
+  InventoryTable:
+    Type: AWS::DynamoDB::Table
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Key-based household/product reads; one partition keeps this small app simple; provisioned capacity for a predictable low-volume household
+        must:
+          - Preserve pk/sk shapes used by server/aws-handler.cjs
+          - Retain inventory on stack deletion or replacement
+        mutable: change-with-constraints
+        mutability:
+          KeySchema: must-never-change
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 2
+        WriteCapacityUnits: 5
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      DeletionProtectionEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      Tags:
+        - Key: App
+          Value: pantry-food-inventory
+  HouseholdUsers:
+    Type: AWS::Cognito::UserPool
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Household-only accounts; admin-created users avoid public registration
+        must:
+          - Keep self-service sign-up disabled so only invited household members can enter
+        mutable: change-with-constraints
+        mutability:
+          UsernameAttributes: review-required
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireUppercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      UserPoolTags:
+        App: pantry-food-inventory
+  HouseholdWebClient:
+    Type: AWS::Cognito::UserPoolClient
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Public SPA client uses SRP; a client secret cannot be protected in browser code
+        must:
+          - Keep GenerateSecret false and user SRP authentication enabled
+          - Keep OAuth redirect flows disabled; the app uses Amplify Auth SRP calls
+    Properties:
+      UserPoolId: !Ref HouseholdUsers
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AccessTokenValidity: 60
+      IdTokenValidity: 60
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+  InventoryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-InventoryApi
+      RetentionInDays: 7
+      Tags:
+        - Key: App
+          Value: pantry-food-inventory
+  InventoryLambdaRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Gives the API function only log-write and inventory-table permissions
+        must:
+          - Do not add wildcard data-plane permissions or access to unrelated tables
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Tags:
+        - Key: App
+          Value: pantry-food-inventory
+      Policies:
+        - PolicyName: InventoryTableAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:TransactWriteItems
+                Resource: !GetAtt InventoryTable.Arn
+        - PolicyName: InventoryLogWrite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub ${InventoryLogGroup.Arn}:*
+  InventoryApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Implements the same /api contract as the local JSON server; SAM maps authenticated HTTP API events to the bundled Node 22 handler
+        must:
+          - Require Cognito JWT authorization on every API route
+          - Keep stock and event writes in a DynamoDB transaction
+        mutable: change-with-constraints
+    Properties:
+      CodeUri: ../.build/lambda/
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Role: !GetAtt InventoryLambdaRole.Arn
+      MemorySize: 256
+      Timeout: 10
+      LoggingConfig:
+        LogGroup: !Ref InventoryLogGroup
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref InventoryTable
+      Description: Household inventory API used by the React pantry app
+      Tags:
+        App: pantry-food-inventory
+      Events:
+        StateRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InventoryHttpApi
+            Path: /api/state
+            Method: GET
+        ProductRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InventoryHttpApi
+            Path: /api/products
+            Method: POST
+        ScanRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InventoryHttpApi
+            Path: /api/scans
+            Method: POST
+        StockRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref InventoryHttpApi
+            Path: /api/stock
+            Method: POST
+  InventoryHttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-inventory
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+        AllowHeaders:
+          - authorization
+          - content-type
+        MaxAge: 3600
+      Auth:
+        Authorizers:
+          HouseholdJwtAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              Audience:
+                - !Ref HouseholdWebClient
+              Issuer: !Sub https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${HouseholdUsers}
+        DefaultAuthorizer: HouseholdJwtAuthorizer
+      Tags:
+        App: pantry-food-inventory
+  WebAssetsBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: Private origin for compiled React assets; no website endpoint is exposed
+        must:
+          - Keep all public access blocks enabled
+          - Keep CloudFront OAC as the only read path and deny non-TLS requests
+        mutable: change-with-constraints
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldWebsiteVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 7
+      Tags:
+        - Key: App
+          Value: pantry-food-inventory
+  WebAssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebAssetsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt WebAssetsBucket.Arn
+              - !Sub ${WebAssetsBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+          - Sid: AllowCloudFrontOriginAccessControl
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub ${WebAssetsBucket.Arn}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${PantryDistribution}
+  PantryOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-web-oac
+        Description: Read private React assets from the pantry bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+  PantryDistribution:
+    Type: AWS::CloudFront::Distribution
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: One HTTPS origin serves the React app, runtime Cognito config, and API; same-origin requests simplify browser auth and avoid CORS dependence
+        must:
+          - Preserve uncached API behavior and forward Authorization
+          - Use HTTPS for viewer and API origin traffic
+        mutable: change-with-constraints
+    Properties:
+      Tags:
+        - Key: App
+          Value: pantry-food-inventory
+      DistributionConfig:
+        Enabled: true
+        Comment: Household food inventory app
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: PrivateWebAssets
+            DomainName: !GetAtt WebAssetsBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !Ref PantryOriginAccessControl
+          - Id: InventoryApi
+            DomainName: !Sub ${InventoryHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols:
+                - TLSv1.2
+        DefaultCacheBehavior:
+          TargetOriginId: PrivateWebAssets
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          Compress: true
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: InventoryApi
+            ViewerProtocolPolicy: https-only
+            AllowedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+              - PUT
+              - PATCH
+              - POST
+              - DELETE
+            CachedMethods:
+              - GET
+              - HEAD
+              - OPTIONS
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            Compress: true
+          - PathPattern: /runtime-config.json
+            TargetOriginId: PrivateWebAssets
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            Compress: true
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+Outputs:
+  AppUrl:
+    Description: HTTPS URL of the pantry app after uploading the built frontend assets.
+    Value: !Sub https://${PantryDistribution.DomainName}
+  DistributionId:
+    Description: CloudFront distribution ID used to invalidate cached frontend files after uploads.
+    Value: !Ref PantryDistribution
+  AssetsBucketName:
+    Description: Private S3 bucket to receive dist/ and runtime-config.json.
+    Value: !Ref WebAssetsBucket
+  ApiUrl:
+    Description: Authenticated HTTP API base URL.
+    Value: !Sub https://${InventoryHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  UserPoolId:
+    Description: Cognito user pool ID for creating household accounts.
+    Value: !Ref HouseholdUsers
+  UserPoolClientId:
+    Description: Public Cognito client ID used by the React app.
+    Value: !Ref HouseholdWebClient
